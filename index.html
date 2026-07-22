@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jogo das Sílabas</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1 class="title">🎈 Jogo das Sílabas</h1>
+      <div class="progress-wrap">
+        <span id="wordCounter" class="word-counter">Palavra 1 de 160</span>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+    </header>
+
+    <main class="game-area">
+      <div class="mascot" id="mascot">🦊</div>
+
+      <div class="word-board" id="wordBoard"></div>
+
+      <div class="mic-status" id="micStatus"></div>
+
+      <div class="feedback" id="feedback"></div>
+
+      <div class="controls">
+        <button id="listenBtn" class="btn secondary">🔊 Ouvir sílaba</button>
+        <button id="listenWordBtn" class="btn secondary">📖 Ouvir palavra</button>
+      </div>
+    </main>
+
+    <footer class="hint">
+      Clique na sílaba destacada e fale bem alto! 🎙️
+    </footer>
+  </div>
+
+  <div class="overlay" id="unsupportedOverlay" hidden>
+    <div class="overlay-card">
+      <h2>Ops! 😅</h2>
+      <p>Seu navegador não é compatível com reconhecimento de voz.</p>
+      <p>Use o <strong>Google Chrome</strong> ou <strong>Microsoft Edge</strong> em um computador ou celular Android.</p>
+    </div>
+  </div>
+
+  <div class="overlay" id="completeOverlay" hidden>
+    <div class="overlay-card">
+      <h2>🎉 Parabéns! 🎉</h2>
+      <p id="completeStats"></p>
+      <button id="restartBtn" class="btn primary">Jogar de novo</button>
+    </div>
+  </div>
+
+  <script src="words.js"></script>
+  <script src="speech.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

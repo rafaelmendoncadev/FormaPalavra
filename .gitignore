@@ -1,0 +1,44 @@
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ambiente local
+.env
+.env.local
+.env.*.local
+
+# Verdent / agent working directory
+.verdent/
+
+# Python (gerado se algum dia migrarmos o backend para Python)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node (caso futuro)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Builds e temporarios
+dist/
+build/
+tmp/
+temp_*.js
+*.tmp
+temp_status.txt
+
+# Sistema operacional
+desktop.ini
