@@ -124,9 +124,15 @@
         mascot.textContent = MASCOT.idle;
         if (err === "not-allowed" || err === "service-not-allowed") {
           micStatus.textContent =
-            "⚠️ Permita o uso do microfone no navegador para jogar.";
+            "⚠️ Permita o uso do microfone no celular para jogar.";
         } else if (err === "no-speech") {
           micStatus.textContent = "Não ouvi nada. Clique e fale de novo!";
+        } else if (err === "network") {
+          micStatus.textContent =
+            "Sem internet. O reconhecimento de voz precisa de conexão.";
+        } else if (err === "timeout") {
+          micStatus.textContent =
+            "Demorei demais pra te ouvir. Tenta de novo!";
         } else {
           micStatus.textContent = "Não consegui te ouvir. Tenta de novo!";
         }
@@ -149,6 +155,18 @@
 
     SpeechModule.speak(isLastSyllable ? data.word : target, {
       onEnd: () => {
+        if (isLastSyllable) {
+          completeWord();
+        } else {
+          state.syllablePos++;
+          activateNextSyllable();
+          state.busy = false;
+        }
+      },
+      onError: () => {
+        // TTS falhou (sem engine instalada, sem voz pt-BR, etc.). Segue
+        // o fluxo normal mas avisa o usuário que o som não saiu.
+        feedback.textContent += " (sem som)";
         if (isLastSyllable) {
           completeWord();
         } else {
@@ -188,6 +206,11 @@
         mascot.textContent = MASCOT.idle;
         state.busy = false;
       },
+      onError: () => {
+        feedback.textContent += " (sem som)";
+        mascot.textContent = MASCOT.idle;
+        state.busy = false;
+      },
     });
   }
 
@@ -217,12 +240,20 @@
     if (state.busy) return;
     const data = currentWord();
     const target = data.syllables[state.syllablePos];
-    SpeechModule.speak(target);
+    SpeechModule.speak(target, {
+      onError: () => {
+        micStatus.textContent = "⚠️ Sem som. Verifique o volume do celular.";
+      },
+    });
   }
 
   function onListenWord() {
     if (state.busy) return;
-    SpeechModule.speak(currentWord().word);
+    SpeechModule.speak(currentWord().word, {
+      onError: () => {
+        micStatus.textContent = "⚠️ Sem som. Verifique o volume do celular.";
+      },
+    });
   }
 
   function onRestart() {

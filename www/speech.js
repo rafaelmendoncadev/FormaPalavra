@@ -3,6 +3,34 @@ const SpeechModule = (() => {
   const synth = window.speechSynthesis || null;
   let ptVoice = null;
 
+  // Quando rodando dentro do APK (Capacitor), o `window.Capacitor.Plugins`
+  // expõe o plugin nativo de reconhecimento de voz. No navegador desktop
+  // esse objeto não existe, e a gente cai no fallback do Web Speech API
+  // (que não funciona de forma confiável no WebView do Android — fica
+  // travado pedindo permissão sem nunca devolver resultado).
+  function getNativeRecognizer() {
+    if (typeof window === "undefined") return null;
+    const cap = window.Capacitor;
+    if (!cap || typeof cap.isNativePlatform !== "function" || !cap.isNativePlatform()) {
+      return null;
+    }
+    return cap.Plugins && cap.Plugins.SpeechRecognition ? cap.Plugins.SpeechRecognition : null;
+  }
+
+  // Mesmo esquema pro TTS: dentro do APK, o `window.speechSynthesis` do
+  // WebView pode existir sem produzir som nenhum (ou ficar preso em
+  // "speaking" sem nenhum callback). O plugin nativo usa o
+  // `android.speech.tts.TextToSpeech` real, que respeita volume do
+  // dispositivo, vozes instaladas, etc.
+  function getNativeTts() {
+    if (typeof window === "undefined") return null;
+    const cap = window.Capacitor;
+    if (!cap || typeof cap.isNativePlatform !== "function" || !cap.isNativePlatform()) {
+      return null;
+    }
+    return cap.Plugins && cap.Plugins.TextToSpeech ? cap.Plugins.TextToSpeech : null;
+  }
+
   function pickVoice() {
     if (!synth) return;
     const voices = synth.getVoices();
@@ -17,12 +45,55 @@ const SpeechModule = (() => {
     synth.onvoiceschanged = pickVoice;
   }
 
-  function speak(text, { rate = 0.85, onEnd } = {}) {
+  function speak(text, { rate = 0.85, onEnd, onError } = {}) {
+    const native = getNativeTts();
+    if (native) {
+      return speakNative({ native, text, rate, onEnd, onError });
+    }
+    return speakWeb({ text, rate, onEnd, onError });
+  }
+
+  function speakNative({ native, text, rate, onEnd, onError }) {
+    // `queueStrategy: 0` (Flush) cancela qualquer fala em andamento e
+    // começa a nova — comportamento equivalente ao `synth.cancel()` do
+    // Web Speech API.
+    native
+      .speak({
+        text: String(text),
+        lang: "pt-BR",
+        rate: rate,
+        pitch: 1.0,
+        volume: 1.0,
+        queueStrategy: 0,
+      })
+      .then(() => {
+        if (onEnd) onEnd();
+      })
+      .catch((err) => {
+        const msg = (err && (err.message || err.errorMessage)) || "";
+        // Se o dispositivo não tem TTS engine (ou pt-BR não tá instalado),
+        // caímos pro Web Speech API como último recurso. Se nem ele
+        // funcionar, a UI avisa o usuário em vez de ficar mudo.
+        if (synth) {
+          speakWeb({ text, rate, onEnd, onError });
+        } else {
+          if (onError) onError(msg || "tts-unavailable");
+          if (onEnd) onEnd();
+        }
+      });
+  }
+
+  function speakWeb({ text, rate, onEnd, onError }) {
     if (!synth) {
+      if (onError) onError("tts-unsupported");
       if (onEnd) onEnd();
       return;
     }
-    synth.cancel();
+    try {
+      synth.cancel();
+    } catch (e) {
+      /* ignore */
+    }
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = "pt-BR";
     if (ptVoice) utter.voice = ptVoice;
@@ -31,9 +102,15 @@ const SpeechModule = (() => {
       if (onEnd) onEnd();
     };
     utter.onerror = () => {
+      if (onError) onError("tts-failed");
       if (onEnd) onEnd();
     };
-    synth.speak(utter);
+    try {
+      synth.speak(utter);
+    } catch (e) {
+      if (onError) onError("tts-failed");
+      if (onEnd) onEnd();
+    }
   }
 
   const RecognitionCtor =
@@ -345,7 +422,107 @@ const SpeechModule = (() => {
     return false;
   }
 
-  function listenOnce({ onStart, onResult, onError, onEnd, timeoutMs = 6000 }) {
+  function listenOnce({ onStart, onResult, onError, onEnd, timeoutMs }) {
+    // Dentro do APK do Android, o Web Speech API fica travado sem nunca
+    // devolver resultado. Usamos o plugin nativo do Capacitor, que
+    // implementa o `SpeechRecognizer` do Android de verdade.
+    const native = getNativeRecognizer();
+    if (native) {
+      // O popup nativo "Fale agora" leva ~1-2s pra abrir, e a criança
+      // pode demorar pra ler a sílaba e falar. 30s cobre isso com folga
+      // sem deixar a tela presa pra sempre se algo der errado.
+      return listenOnceNative({ native, onStart, onResult, onError, onEnd, timeoutMs: timeoutMs || 30000 });
+    }
+    return listenOnceWeb({ onStart, onResult, onError, onEnd, timeoutMs: timeoutMs || 6000 });
+  }
+
+  function listenOnceNative({ native, onStart, onResult, onError, onEnd, timeoutMs }) {
+    if (listening) return;
+    let settled = false;
+    let stopTimer = null;
+
+    // Hard-stop de segurança caso o plugin não chame nenhum callback
+    // (improvável, mas protege contra a "travada" original).
+    const safetyTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        listening = false;
+        try {
+          native.stop();
+        } catch (e) {
+          /* ignore */
+        }
+        if (onError) onError("timeout");
+      }
+    }, timeoutMs + 2000);
+
+    // Garante permissão antes de iniciar; sem isso, o `start()` rejeita
+    // com "Missing permission" e a UI fica travada pra sempre.
+    const perms = native.checkPermissions
+      ? native.checkPermissions().catch(() => ({ speechRecognition: "denied" }))
+      : Promise.resolve({ speechRecognition: "granted" });
+
+    perms
+      .then((status) => {
+        if (status && status.speechRecognition && status.speechRecognition !== "granted") {
+          return native.requestPermissions
+            ? native.requestPermissions()
+            : Promise.resolve(status);
+        }
+        return status;
+      })
+      .then(() => {
+        listening = true;
+        if (onStart) onStart();
+
+        // `popup: true` mostra o diálogo nativo "Fale agora" do Android,
+        // dando feedback visual pra criança. `partialResults: false`
+        // porque (a) no Android parcial não funciona com popup ligado e
+        // (b) o `matchesSyllable` daqui já lida bem com o resultado final.
+        return native.start({
+          language: "pt-BR",
+          maxResults: 5,
+          popup: true,
+          partialResults: false,
+        });
+      })
+      .then((result) => {
+        if (settled) return;
+        settled = true;
+        listening = false;
+        clearTimeout(safetyTimer);
+        if (stopTimer) clearTimeout(stopTimer);
+        const matches = (result && result.matches) || [];
+        if (matches.length === 0) {
+          if (onError) onError("no-speech");
+        } else if (onResult) {
+          onResult(matches);
+        }
+        if (onEnd) onEnd();
+      })
+      .catch((err) => {
+        if (settled) return;
+        settled = true;
+        listening = false;
+        clearTimeout(safetyTimer);
+        if (stopTimer) clearTimeout(stopTimer);
+        if (onError) {
+          const msg = (err && (err.message || err.errorMessage)) || "";
+          if (/permission/i.test(msg)) {
+            onError("not-allowed");
+          } else if (/no.match|no.speech|timeout/i.test(msg)) {
+            onError("no-speech");
+          } else if (/network/i.test(msg)) {
+            onError("network");
+          } else {
+            onError(msg || "start-failed");
+          }
+        }
+        if (onEnd) onEnd();
+      });
+  }
+
+  function listenOnceWeb({ onStart, onResult, onError, onEnd, timeoutMs }) {
     if (!RecognitionCtor) {
       if (onError) onError("unsupported");
       return;
@@ -416,6 +593,16 @@ const SpeechModule = (() => {
   }
 
   function stopListening() {
+    const native = getNativeRecognizer();
+    if (native && listening) {
+      try {
+        native.stop();
+      } catch (e) {
+        /* ignore */
+      }
+      listening = false;
+      return;
+    }
     if (recognizer && listening) {
       try {
         recognizer.stop();
