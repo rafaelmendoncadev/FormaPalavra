@@ -1,31 +1,26 @@
 # Jogo das Sílabas
 
 Aplicativo web para praticar leitura de sílabas simples, baseado no material
-"Lápis da Leitura – Sílabas Simples". A criança clica na sílaba destacada, fala
-em voz alta, e o app usa reconhecimento de voz para verificar a pronúncia,
-dando feedback e falando a pronúncia correta quando necessário. Só avança de
-sílaba/palavra depois de acertar todas as sílabas da palavra atual.
+"Lápis da Leitura – Sílabas Simples". A criança vê uma imagem representando a
+palavra e arrasta as sílabas embaralhadas até os espaços vazios, na ordem
+certa, para montar a palavra. Só avança para a próxima palavra depois de
+completar corretamente todos os espaços da palavra atual.
 
 ## Demo
 
 Clone o repositório, dê dois cliques em `iniciar.bat` (Windows) ou rode um
 servidor local (ver [Como rodar localmente](#como-rodar-localmente)) e abra no
-Chrome ou Edge. Permita o uso do microfone quando o navegador pedir.
+navegador.
 
 ## Requisitos
 
-- Navegador **Google Chrome** ou **Microsoft Edge** (desktop ou Android). Firefox
-  e Safari não suportam bem a API de reconhecimento de voz usada aqui.
-- **Microfone** disponível e permissão concedida ao navegador.
-- **Conexão com a internet**: o reconhecimento de voz do navegador processa o
-  áudio em servidores do Google, então é necessário estar online.
+- Qualquer navegador moderno com suporte a Pointer Events (Chrome, Edge,
+  Firefox, Safari, desktop ou celular).
+- Não é necessário microfone nem conexão com a internet para jogar — todo o
+  jogo funciona localmente, sem reconhecimento de voz ou narração falada.
 
 ## Como rodar localmente
 
-Por segurança, os navegadores só liberam o microfone/reconhecimento de voz em
-um "contexto seguro" (`https://` ou `http://localhost`). Abrir o `index.html`
-direto pelo Windows Explorer (`file://`) pode não funcionar. Use um servidor
-local simples:
 
 **Opção mais fácil - clique duas vezes em `iniciar.bat`:**
 
@@ -57,41 +52,34 @@ npx serve .
 
 Abra o endereço mostrado no terminal (algo como `http://localhost:3000`).
 
-Quando o navegador pedir permissão de microfone, clique em **Permitir**.
-
 ## Como jogar
 
-1. A palavra atual aparece dividida em sílabas (botões).
-2. Apenas a sílaba destacada (laranja, pulsando) pode ser clicada.
-3. Clique nela e fale a sílaba em voz alta.
-4. Se acertar: a sílaba fica verde com ✓ e o app fala a sílaba (ou a palavra
-   inteira, se for a última) antes de liberar a próxima.
-5. Se errar: o app fala a pronúncia correta e permite tentar de novo na mesma
-   sílaba, quantas vezes for preciso.
-6. Só passa para a próxima palavra depois de acertar **todas** as sílabas da
-   palavra atual.
-7. Use "🔊 Ouvir sílaba" para escutar a sílaba atual sem que isso conte como
-   tentativa, ou "📖 Ouvir palavra" para escutar a palavra inteira.
-8. Ao concluir todas as palavras, uma tela de parabéns mostra o resumo e
-   permite jogar novamente.
+1. A palavra atual aparece com uma imagem representando seu significado.
+2. As sílabas da palavra aparecem embaralhadas em uma bandeja, abaixo dos
+   espaços vazios (um por sílaba, na ordem correta).
+3. Arraste cada sílaba da bandeja até o espaço correspondente.
+4. Se acertar: a sílaba se encaixa no espaço, toca um som de acerto e o
+   mascote comemora.
+5. Se errar: a sílaba volta para a bandeja, toca um som de erro e o mascote
+   fica triste; a criança pode tentar de novo quantas vezes for preciso. Após
+   3 erros seguidos na mesma palavra, a sílaba certa pisca na bandeja como
+   dica.
+6. Só passa para a próxima palavra depois de preencher **todos** os espaços
+   corretamente.
+7. Ao concluir todas as palavras de uma ilha/nível, uma tela de conclusão
+   mostra o resumo e libera a próxima ilha no mapa.
 
 ## Estrutura do projeto
 
 ```
 index.html   - estrutura da página
 style.css    - visual colorido e responsivo
-words.js     - lista das 160 palavras com divisão silábica
-speech.js    - wrapper para síntese (TTS) e reconhecimento (STT) de voz
-app.js       - lógica do jogo (estado, fluxo de sílabas/palavras)
+words.js     - lista das 160 palavras com divisão silábica e imagem
+sfx.js       - efeitos sonoros curtos sintetizados (Web Audio API), sem voz
+app.js       - lógica do jogo (arrastar e soltar sílabas)
+home.js      - mapa/trilha de níveis, mascote e área dos pais
+progress.js  - persistência do progresso (localStorage)
+assets/images/words/*.png - ícones ilustrativos de cada palavra
 iniciar.bat  - inicia o servidor local e abre o jogo automaticamente (Windows)
 ```
 
-## Limitações conhecidas
-
-- O reconhecimento de sílabas isoladas e curtas (ex.: "sa", "la") é menos
-  preciso que o de palavras inteiras, pois há pouco áudio para analisar. O app
-  usa uma comparação tolerante (ignora acentos/maiúsculas e considera
-  alternativas de transcrição) para reduzir falsos negativos, mas erros de
-  reconhecimento ainda podem ocorrer.
-- Funciona melhor em ambientes silenciosos, com o microfone próximo à criança.
-- Requer internet ativa durante o uso.

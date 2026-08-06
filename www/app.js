@@ -1,268 +1,264 @@
-// app.js - lógica principal do jogo
+// app.js - lógica da tela de lição: monta a palavra arrastando as
+// sílabas embaralhadas até os espaços corretos (sem voz).
 (() => {
   const state = {
+    currentLevel: null,
     wordPos: 0,
-    syllablePos: 0,
+    slots: [], // sílabas corretas, na ordem certa (referência, não muda)
+    filled: [], // bool por slot
+    tiles: [], // { id, text } - sílabas ainda na bandeja, embaralhadas
+    wrongCount: 0,
+    dragTileId: null,
     stats: { wordsCompleted: 0, totalAttempts: 0 },
-    busy: false,
   };
 
-  const wordBoard = document.getElementById("wordBoard");
+  const wordImage = document.getElementById("wordImage");
+  const slotsRow = document.getElementById("slotsRow");
+  const tileTray = document.getElementById("tileTray");
   const wordCounter = document.getElementById("wordCounter");
+  const levelBadge = document.getElementById("levelBadge");
   const progressFill = document.getElementById("progressFill");
-  const micStatus = document.getElementById("micStatus");
   const feedback = document.getElementById("feedback");
-  const listenBtn = document.getElementById("listenBtn");
-  const listenWordBtn = document.getElementById("listenWordBtn");
+  const backToMapBtn = document.getElementById("backToMapBtn");
   const mascot = document.getElementById("mascot");
-  const unsupportedOverlay = document.getElementById("unsupportedOverlay");
   const completeOverlay = document.getElementById("completeOverlay");
+  const completeTitle = document.getElementById("completeTitle");
   const completeStats = document.getElementById("completeStats");
-  const restartBtn = document.getElementById("restartBtn");
+  const continueBtn = document.getElementById("continueBtn");
 
-  const MASCOT = {
-    idle: "🦊",
-    listen: "🎤",
-    happy: "🥳",
-    sad: "🙈",
-  };
+  const MASCOT_STATES = ["idle", "happy", "sad"];
+  function setMascotState(name) {
+    MASCOT_STATES.forEach((s) => mascot.classList.remove("mascot--" + s));
+    mascot.classList.add("mascot--" + name);
+  }
 
   function currentWord() {
     return WORDS[state.wordPos];
   }
 
-  function init() {
-    try {
-      if (typeof SpeechModule === "undefined" || typeof WORDS === "undefined") {
-        throw new Error("recursos-nao-carregados");
-      }
-      if (!SpeechModule.isSupported()) {
-        unsupportedOverlay.hidden = false;
-      }
-      restartBtn.addEventListener("click", onRestart);
-      listenBtn.addEventListener("click", onListenSyllable);
-      listenWordBtn.addEventListener("click", onListenWord);
-      renderWord();
-    } catch (e) {
-      // Se algum arquivo (words.js/speech.js) não carregou por uma falha de
-      // rede, mostramos um aviso claro em vez de deixar a tela em branco.
-      feedback.textContent =
-        "⚠️ Não consegui carregar o jogo. Recarregue a página (F5).";
-      feedback.className = "feedback incorrect";
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
     }
+    return a;
   }
+
+  function openLevel(level) {
+    state.currentLevel = level;
+    state.wordPos = level.start;
+    state.stats = { wordsCompleted: 0, totalAttempts: 0 };
+    levelBadge.textContent = "Nível " + level.id;
+    renderWord();
+  }
+  window.LessonScreen = { open: openLevel };
+
+  let tileIdSeq = 0;
 
   function renderWord() {
     const data = currentWord();
-    wordBoard.innerHTML = "";
+    state.slots = data.syllables.slice();
+    state.filled = new Array(state.slots.length).fill(false);
+    state.tiles = shuffle(
+      data.syllables.map((text) => ({ id: "t" + tileIdSeq++, text }))
+    );
+    state.wrongCount = 0;
     feedback.textContent = "";
     feedback.className = "feedback";
-    micStatus.textContent = "";
-    mascot.textContent = MASCOT.idle;
-    state.busy = false;
+    setMascotState("idle");
 
-    data.syllables.forEach((syl, idx) => {
-      const btn = document.createElement("button");
-      btn.className = "syllable-btn";
-      btn.textContent = syl;
-      btn.dataset.index = String(idx);
+    wordImage.classList.remove("word-image--missing");
+    wordImage.alt = data.word;
+    wordImage.onerror = () => {
+      wordImage.classList.add("word-image--missing");
+    };
+    wordImage.src = data.image || "";
 
-      if (idx < state.syllablePos) {
-        btn.classList.add("done");
-        btn.disabled = true;
-      } else if (idx === state.syllablePos) {
-        btn.classList.add("active");
-        btn.addEventListener("click", () => onSyllableClick(idx));
-      } else {
-        btn.classList.add("locked");
-        btn.disabled = true;
-      }
-      wordBoard.appendChild(btn);
-    });
+    renderSlots();
+    renderTray();
 
-    wordCounter.textContent = `Palavra ${state.wordPos + 1} de ${WORDS.length}`;
-    progressFill.style.width = `${(state.wordPos / WORDS.length) * 100}%`;
+    const level = state.currentLevel;
+    const localIndex = state.wordPos - level.start + 1;
+    const levelSize = level.end - level.start;
+    wordCounter.textContent = "Palavra " + localIndex + " de " + levelSize;
+    progressFill.style.width = ((localIndex - 1) / levelSize) * 100 + "%";
   }
 
-  function getBtn(idx) {
-    return wordBoard.querySelector(`[data-index="${idx}"]`);
-  }
-
-  function onSyllableClick(idx) {
-    if (state.busy) return;
-    if (idx !== state.syllablePos) return;
-
-    const data = currentWord();
-    const target = data.syllables[idx];
-    const btn = getBtn(idx);
-
-    state.busy = true;
-    btn.classList.add("listening");
-    micStatus.textContent = "🎤 Escutando... fale a sílaba!";
-    mascot.textContent = MASCOT.listen;
-    feedback.textContent = "";
-    feedback.className = "feedback";
-
-    SpeechModule.listenOnce({
-      onResult: (alternatives) => {
-        state.stats.totalAttempts++;
-        btn.classList.remove("listening");
-        micStatus.textContent = "";
-        // Log de diagnóstico. Se uma sílaba não for reconhecida, abra o
-        // Console (F12) e me diga o que apareceu nessa linha — assim
-        // posso ampliar a tabela de variações do speech.js.
-        console.log("[STT]", { target, alternatives });
-        const correct = SpeechModule.matchesSyllable(alternatives, target);
-        if (correct) {
-          handleCorrect(idx, target);
-        } else {
-          handleIncorrect(idx, target);
-        }
-      },
-      onError: (err) => {
-        btn.classList.remove("listening");
-        mascot.textContent = MASCOT.idle;
-        if (err === "not-allowed" || err === "service-not-allowed") {
-          micStatus.textContent =
-            "⚠️ Permita o uso do microfone no celular para jogar.";
-        } else if (err === "no-speech") {
-          micStatus.textContent = "Não ouvi nada. Clique e fale de novo!";
-        } else if (err === "network") {
-          micStatus.textContent =
-            "Sem internet. O reconhecimento de voz precisa de conexão.";
-        } else if (err === "timeout") {
-          micStatus.textContent =
-            "Demorei demais pra te ouvir. Tenta de novo!";
-        } else {
-          micStatus.textContent = "Não consegui te ouvir. Tenta de novo!";
-        }
-        state.busy = false;
-      },
+  function renderSlots() {
+    slotsRow.innerHTML = "";
+    state.slots.forEach((syl, i) => {
+      const slot = document.createElement("div");
+      slot.className = "slot" + (state.filled[i] ? " slot--filled" : "");
+      slot.dataset.index = String(i);
+      slot.textContent = state.filled[i] ? syl : "";
+      slotsRow.appendChild(slot);
     });
   }
 
-  function handleCorrect(idx, target) {
-    const btn = getBtn(idx);
-    btn.classList.remove("active");
-    btn.classList.add("done", "correct-flash");
-    btn.disabled = true;
-    feedback.textContent = `✅ Isso mesmo! "${target}"`;
-    feedback.className = "feedback correct";
-    mascot.textContent = MASCOT.happy;
-
-    const data = currentWord();
-    const isLastSyllable = idx === data.syllables.length - 1;
-
-    SpeechModule.speak(isLastSyllable ? data.word : target, {
-      onEnd: () => {
-        if (isLastSyllable) {
-          completeWord();
-        } else {
-          state.syllablePos++;
-          activateNextSyllable();
-          state.busy = false;
-        }
-      },
-      onError: () => {
-        // TTS falhou (sem engine instalada, sem voz pt-BR, etc.). Segue
-        // o fluxo normal mas avisa o usuário que o som não saiu.
-        feedback.textContent += " (sem som)";
-        if (isLastSyllable) {
-          completeWord();
-        } else {
-          state.syllablePos++;
-          activateNextSyllable();
-          state.busy = false;
-        }
-      },
+  function renderTray() {
+    tileTray.innerHTML = "";
+    state.tiles.forEach((tile) => {
+      const el = document.createElement("div");
+      el.className = "syllable-tile";
+      el.textContent = tile.text;
+      el.dataset.tileId = tile.id;
+      el.dataset.text = tile.text;
+      attachDrag(el, tile);
+      tileTray.appendChild(el);
     });
   }
 
-  function activateNextSyllable() {
-    const nextBtn = getBtn(state.syllablePos);
-    if (nextBtn) {
-      nextBtn.classList.remove("locked");
-      nextBtn.classList.add("active");
-      nextBtn.disabled = false;
-      nextBtn.addEventListener("click", () =>
-        onSyllableClick(state.syllablePos)
-      );
+  function firstEmptySlotIndex() {
+    return state.filled.indexOf(false);
+  }
+
+  function showHint() {
+    const idx = firstEmptySlotIndex();
+    if (idx === -1) return;
+    const neededText = state.slots[idx];
+    const tileEl = tileTray.querySelector('[data-text="' + neededText + '"]');
+    if (tileEl) {
+      tileEl.classList.add("syllable-tile--hint");
+      setTimeout(() => tileEl.classList.remove("syllable-tile--hint"), 1500);
     }
-    feedback.textContent = "";
-    feedback.className = "feedback";
-    mascot.textContent = MASCOT.idle;
   }
 
-  function handleIncorrect(idx, target) {
-    const btn = getBtn(idx);
-    btn.classList.add("incorrect-flash");
-    setTimeout(() => btn.classList.remove("incorrect-flash"), 500);
-    feedback.textContent = "❌ Quase lá! Escute e tente de novo:";
-    feedback.className = "feedback incorrect";
-    mascot.textContent = MASCOT.sad;
+  function attachDrag(el, tile) {
+    el.addEventListener("pointerdown", (e) => {
+      if (state.dragTileId) return;
+      state.dragTileId = tile.id;
+      el.setPointerCapture(e.pointerId);
+      const rect = el.getBoundingClientRect();
+      el.classList.add("syllable-tile--dragging");
+      el.style.width = rect.width + "px";
+      el.style.position = "fixed";
+      el.style.left = rect.left + "px";
+      el.style.top = rect.top + "px";
+      el.style.zIndex = "50";
+      const offsetX = e.clientX - rect.left;
+      const offsetY = e.clientY - rect.top;
 
-    SpeechModule.speak(target, {
-      onEnd: () => {
-        mascot.textContent = MASCOT.idle;
-        state.busy = false;
-      },
-      onError: () => {
-        feedback.textContent += " (sem som)";
-        mascot.textContent = MASCOT.idle;
-        state.busy = false;
-      },
+      function onMove(ev) {
+        el.style.left = ev.clientX - offsetX + "px";
+        el.style.top = ev.clientY - offsetY + "px";
+      }
+
+      function onUp(ev) {
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup", onUp);
+        el.removeEventListener("pointercancel", onUp);
+        state.dragTileId = null;
+        handleDrop(ev.clientX, ev.clientY, tile, el);
+      }
+
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
     });
+  }
+
+  function handleDrop(clientX, clientY, tile, el) {
+    const targets = document.elementsFromPoint(clientX, clientY);
+    const slotEl = targets.find(
+      (t) =>
+        t.classList &&
+        t.classList.contains("slot") &&
+        !t.classList.contains("slot--filled")
+    );
+
+    el.classList.remove("syllable-tile--dragging");
+    el.style.position = "";
+    el.style.left = "";
+    el.style.top = "";
+    el.style.width = "";
+    el.style.zIndex = "";
+
+    if (!slotEl) {
+      renderTray();
+      return;
+    }
+
+    const slotIndex = parseInt(slotEl.dataset.index, 10);
+    state.stats.totalAttempts++;
+    Progress.addAttempt(Progress.load());
+
+    if (state.slots[slotIndex] === tile.text) {
+      state.filled[slotIndex] = true;
+      state.tiles = state.tiles.filter((t) => t.id !== tile.id);
+      SFX.playCorrect();
+      setMascotState("happy");
+      feedback.textContent = "";
+      feedback.className = "feedback";
+      renderSlots();
+      renderTray();
+      if (state.filled.every(Boolean)) {
+        completeWord();
+      } else {
+        setTimeout(() => setMascotState("idle"), 500);
+      }
+    } else {
+      state.wrongCount++;
+      SFX.playIncorrect();
+      setMascotState("sad");
+      feedback.textContent = "❌ Quase lá! Tenta de novo.";
+      feedback.className = "feedback incorrect";
+      renderTray();
+      setTimeout(() => {
+        setMascotState("idle");
+        feedback.textContent = "";
+        feedback.className = "feedback";
+      }, 900);
+      if (state.wrongCount >= 3) {
+        state.wrongCount = 0;
+        showHint();
+      }
+    }
   }
 
   function completeWord() {
     state.stats.wordsCompleted++;
-    feedback.textContent = `🎉 Palavra completa: ${currentWord().word}!`;
+    Progress.addWordCompleted(Progress.load());
+    feedback.textContent = "🎉 Palavra completa: " + currentWord().word + "!";
     feedback.className = "feedback complete";
-    mascot.textContent = MASCOT.happy;
+    setMascotState("happy");
 
     setTimeout(() => {
+      const level = state.currentLevel;
       state.wordPos++;
-      state.syllablePos = 0;
-      if (state.wordPos >= WORDS.length) {
-        showComplete();
+      if (state.wordPos >= level.end) {
+        finishLevel();
       } else {
         renderWord();
       }
-    }, 1700);
+    }, 1400);
   }
 
-  function showComplete() {
+  function finishLevel() {
+    const level = state.currentLevel;
+    Progress.completeLevel(Progress.load(), level.id, LEVELS.length);
+    const isLastLevel = level.id >= LEVELS.length;
+    SFX.playLevelComplete();
+
+    completeTitle.textContent = isLastLevel
+      ? "🎉 Você leu todas as palavras!"
+      : "🌟 Ilha concluída!";
+    completeStats.textContent =
+      "Você completou " +
+      state.stats.wordsCompleted +
+      " palavras com " +
+      state.stats.totalAttempts +
+      " tentativas nesta ilha." +
+      (isLastLevel ? "" : " Uma nova ilha foi desbloqueada no mapa!");
     completeOverlay.hidden = false;
-    completeStats.textContent = `Você completou ${state.stats.wordsCompleted} palavras com ${state.stats.totalAttempts} tentativas no total!`;
   }
 
-  function onListenSyllable() {
-    if (state.busy) return;
-    const data = currentWord();
-    const target = data.syllables[state.syllablePos];
-    SpeechModule.speak(target, {
-      onError: () => {
-        micStatus.textContent = "⚠️ Sem som. Verifique o volume do celular.";
-      },
-    });
-  }
-
-  function onListenWord() {
-    if (state.busy) return;
-    SpeechModule.speak(currentWord().word, {
-      onError: () => {
-        micStatus.textContent = "⚠️ Sem som. Verifique o volume do celular.";
-      },
-    });
-  }
-
-  function onRestart() {
-    state.wordPos = 0;
-    state.syllablePos = 0;
-    state.stats = { wordsCompleted: 0, totalAttempts: 0 };
+  continueBtn.addEventListener("click", () => {
     completeOverlay.hidden = true;
-    renderWord();
-  }
+    if (window.showHome) window.showHome();
+  });
 
-  init();
+  backToMapBtn.addEventListener("click", () => {
+    if (window.showHome) window.showHome();
+  });
 })();
