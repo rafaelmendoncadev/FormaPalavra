@@ -1,0 +1,9 @@
+android
+ios
+*.apk
+node_modules
+prompt
+specs
+.verdent
+.gemini
+0)

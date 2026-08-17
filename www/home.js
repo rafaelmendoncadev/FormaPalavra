@@ -1,224 +1,251 @@
-// home.js - tela Home / Mapa da Trilha: renderiza as ilhas (níveis),
-// mascote Sabi, barra de progresso e os modais de Jardim / Área dos pais.
+// home.js - Gerenciador da Tela Inicial (Hub da Criança), Mapa da Trilha e Navegação Geral.
 (() => {
   const homeScreen = document.getElementById("homeScreen");
+  const mapScreen = document.getElementById("mapScreen");
   const lessonScreen = document.getElementById("lessonScreen");
+
   const trailWrap = document.getElementById("trailWrap");
-  const homeProgressFill = document.getElementById("homeProgressFill");
   const mascotDock = document.getElementById("mascotDock");
+  const mapProgressFill = document.getElementById("mapProgressFill");
+  const mapProgressSubtitle = document.getElementById("mapProgressSubtitle");
 
-  const parentBtn = document.getElementById("parentBtn");
-  const gardenBtn = document.getElementById("gardenBtn");
+  // Botões do Hub da Criança
+  const homeContinueBtn = document.getElementById("homeContinueBtn");
+  const homeContinueSub = document.getElementById("homeContinueSub");
+  const homeAdventureBtn = document.getElementById("homeAdventureBtn");
+  const homeGardenBtn = document.getElementById("homeGardenBtn");
+  const homeGardenQuickBtn = document.getElementById("homeGardenQuickBtn");
+  const homeBadgesBtn = document.getElementById("homeBadgesBtn");
+  const mapBackToHomeBtn = document.getElementById("mapBackToHomeBtn");
+  const soundToggleBtn = document.getElementById("soundToggleBtn");
+  const soundToggleIcon = document.getElementById("soundToggleIcon");
 
-  const parentGateOverlay = document.getElementById("parentGateOverlay");
-  const parentQuestionEl = document.getElementById("parentQuestion");
-  const parentOptionsEl = document.getElementById("parentOptions");
-  const parentCancelBtn = document.getElementById("parentCancelBtn");
+  // Estatísticas no Hub
+  const hubFlowerCount = document.getElementById("hubFlowerCount");
+  const hubStarCount = document.getElementById("hubStarCount");
+  const hubSabiSpeech = document.getElementById("hubSabiSpeech");
 
-  const parentReportOverlay = document.getElementById("parentReportOverlay");
-  const parentReportBody = document.getElementById("parentReportBody");
-  const parentReportCloseBtn = document.getElementById("parentReportCloseBtn");
-
+  // Modais de Jardim e Conquistas
   const gardenOverlay = document.getElementById("gardenOverlay");
-  const gardenGrid = document.getElementById("gardenGrid");
-  const gardenEmpty = document.getElementById("gardenEmpty");
   const gardenCloseBtn = document.getElementById("gardenCloseBtn");
+  const achievementsOverlay = document.getElementById("achievementsOverlay");
+  const achievementsCloseBtn = document.getElementById("achievementsCloseBtn");
 
-  let currentAnswer = null;
+  function updateHub() {
+    const state = Progress.load();
 
+    // Atualiza contadores do topo
+    if (hubFlowerCount) hubFlowerCount.textContent = String(state.flowersTotal || 0);
+
+    let totalStars = 0;
+    Object.values(state.levelStars || {}).forEach((s) => (totalStars += s));
+    if (hubStarCount) hubStarCount.textContent = String(totalStars);
+
+    // Texto do botão Continuar
+    const currentLevelId = Math.min(state.unlockedLevel || 1, LEVELS.length);
+    const levelObj = LEVELS.find((l) => l.id === currentLevelId) || LEVELS[0];
+    const lastWordIndex = state.lastPlayedWordIndex || levelObj.start;
+    const wordLocalIndex = Math.min(Math.max(1, lastWordIndex - levelObj.start + 1), levelObj.end - levelObj.start);
+
+    if (homeContinueSub) {
+      homeContinueSub.textContent = `Ilha ${levelObj.id} (${levelObj.name}) • Palavra ${wordLocalIndex}`;
+    }
+
+    // Frase da Sabi
+    if (hubSabiSpeech && typeof SabiGuide !== "undefined") {
+      hubSabiSpeech.textContent = SabiGuide.randomPhrase("welcome");
+    }
+
+    // Estado do botão de áudio
+    updateSoundIcon();
+  }
+
+  function updateSoundIcon() {
+    const state = Progress.load();
+    const isMuted = state.settings && (state.settings.voice === false && state.settings.sfx === false);
+    if (soundToggleIcon) {
+      soundToggleIcon.textContent = isMuted ? "🔇" : "🔊";
+    }
+  }
+
+  function toggleAudio() {
+    const state = Progress.load();
+    const currentlyMuted = state.settings && (state.settings.voice === false && state.settings.sfx === false);
+    const newState = !currentlyMuted; // true = unmuted, false = muted
+
+    Progress.updateSettings(state, {
+      voice: !newState ? false : true,
+      sfx: !newState ? false : true,
+    });
+
+    if (typeof AppAudio !== "undefined") {
+      AppAudio.setVoiceEnabled(!newState ? false : true);
+      AppAudio.setSfxEnabled(!newState ? false : true);
+    }
+
+    if (newState && typeof SFX !== "undefined") {
+      SFX.playTap();
+    }
+
+    updateSoundIcon();
+  }
+  if (soundToggleBtn) soundToggleBtn.addEventListener("click", toggleAudio);
+
+  // Renderização do Mapa de Ilhas Temáticas
   function renderTrail() {
     const state = Progress.load();
-    // Limpa só os nós da trilha; o mascotDock é removido do DOM junto (ele
-    // vive dentro de trailWrap), então precisamos religá-lo depois.
     trailWrap.innerHTML = "";
 
-    LEVELS.forEach((level, idx) => {
+    LEVELS.forEach((level) => {
       const unlocked = Progress.isLevelUnlocked(state, level.id);
       const completed = Progress.isLevelCompleted(state, level.id);
       const isCurrent = unlocked && !completed && level.id === state.unlockedLevel;
+      const stars = state.levelStars ? state.levelStars[level.id] || 0 : 0;
 
-      const btn = document.createElement("button");
-      btn.className =
-        "trail-node " + (idx % 2 === 0 ? "trail-node--left" : "trail-node--right");
-      if (!unlocked) btn.classList.add("trail-node--locked");
-      if (isCurrent) btn.classList.add("trail-node--current");
-      if (completed) btn.classList.add("trail-node--done");
-      btn.dataset.level = String(level.id);
+      const card = document.createElement("div");
+      card.className = "island-card-node";
+      if (!unlocked) card.classList.add("island-card-node--locked");
+      if (isCurrent) card.classList.add("island-card-node--current");
+      if (completed) card.classList.add("island-card-node--done");
 
-      const stone = '<span class="trail-node-stone" aria-hidden="true"></span>';
-      if (!unlocked) {
-        btn.innerHTML =
-          stone + '<span class="trail-node-lock">' + ICONS.lock + "</span>";
-        btn.disabled = true;
-        btn.setAttribute("aria-label", "Ilha " + level.id + " bloqueada");
-      } else {
-        btn.innerHTML =
-          stone +
-          '<span class="trail-node-num">' +
-          level.id +
-          "</span>" +
-          (completed ? '<span class="trail-node-badge">&#10003;</span>' : "");
-        btn.setAttribute(
-          "aria-label",
-          "Ilha " + level.id + (completed ? " concluída" : " disponível")
-        );
-        btn.addEventListener("click", () => startLevel(level));
+      card.dataset.level = String(level.id);
+
+      let starsHtml = "";
+      if (completed) {
+        starsHtml = "⭐".repeat(Math.max(1, stars));
       }
-      trailWrap.appendChild(btn);
+
+      let statusPillHtml = "";
+      if (!unlocked) {
+        statusPillHtml = '<span class="island-status-pill island-status-pill--locked">🔒 Bloqueada</span>';
+      } else if (completed) {
+        statusPillHtml = '<span class="island-status-pill island-status-pill--done">✓ Concluída</span>';
+      } else {
+        statusPillHtml = '<span class="island-status-pill island-status-pill--current">▶ Jogar Agora</span>';
+      }
+
+      card.innerHTML = `
+        <div class="island-icon-badge" style="background-color: ${level.color}20; color: ${level.color}">
+          <span>${level.icon}</span>
+        </div>
+        <div class="island-info">
+          <span class="island-num-tag">Ilha ${level.id}</span>
+          <h3 class="island-name">${level.name}</h3>
+          <span class="island-theme">${level.theme}</span>
+        </div>
+        <div class="island-status-badge">
+          ${starsHtml ? `<span class="island-stars">${starsHtml}</span>` : ""}
+          ${statusPillHtml}
+        </div>
+      `;
+
+      if (unlocked) {
+        card.addEventListener("click", () => {
+          if (typeof SFX !== "undefined") SFX.playTap();
+          startLevel(level);
+        });
+      }
+
+      trailWrap.appendChild(card);
     });
 
-    // Religa o mascote (innerHTML="" acima o removeu do DOM).
+    // Reposiciona o mascote Sabi na ilha atual
     trailWrap.appendChild(mascotDock);
-
-    const fillPct =
-      LEVELS.length > 0
-        ? (state.completedLevels.length / LEVELS.length) * 100
-        : 0;
-    homeProgressFill.style.width = fillPct + "%";
-
     positionMascot(state);
-    scrollToCurrent();
-  }
 
-  function findCurrentNodeEl() {
-    const current = trailWrap.querySelector(".trail-node--current");
-    if (current) return current;
-    // Sem "atual" (ex.: todas as ilhas concluídas) -> usa a última
-    // desbloqueada, não a primeira, e nunca o mascotDock (que também é
-    // filho de trailWrap).
-    const unlocked = trailWrap.querySelectorAll(".trail-node:not(.trail-node--locked)");
-    return unlocked.length > 0 ? unlocked[unlocked.length - 1] : null;
+    // Progresso do mapa
+    const completedCount = state.completedLevels.length;
+    if (mapProgressSubtitle) {
+      mapProgressSubtitle.textContent = `${completedCount} de ${LEVELS.length} Ilhas Concluídas`;
+    }
+    const fillPct = (completedCount / LEVELS.length) * 100;
+    if (mapProgressFill) mapProgressFill.style.width = fillPct + "%";
   }
+  window.renderHomeTrail = renderTrail;
 
   function positionMascot(state) {
-    const el = findCurrentNodeEl();
-    if (!el) return;
-    const onLeft = el.classList.contains("trail-node--left");
-    mascotDock.style.top = Math.max(0, el.offsetTop - 34) + "px";
-    mascotDock.style.left = onLeft
-      ? el.offsetLeft + el.offsetWidth + 4 + "px"
-      : Math.max(0, el.offsetLeft - 62) + "px";
+    const currentEl = trailWrap.querySelector(".island-card-node--current") || trailWrap.querySelector(".island-card-node:not(.island-card-node--locked)");
+    if (!currentEl) return;
+    mascotDock.style.top = Math.max(0, currentEl.offsetTop + 10) + "px";
+    mascotDock.style.right = "10px";
+    mascotDock.style.left = "auto";
   }
 
-  function scrollToCurrent() {
-    const el = findCurrentNodeEl();
-    if (el && el.scrollIntoView) {
-      el.scrollIntoView({ block: "center", behavior: "auto" });
-    }
-  }
-
-  function startLevel(level) {
+  function startLevel(level, startWordPos) {
     if (!window.LessonScreen) return;
     homeScreen.hidden = true;
+    mapScreen.hidden = true;
     lessonScreen.hidden = false;
-    window.LessonScreen.open(level);
+    window.LessonScreen.open(level, startWordPos);
   }
+
+  function continueAdventure() {
+    const state = Progress.load();
+    const currentLevelId = Math.min(state.unlockedLevel || 1, LEVELS.length);
+    const levelObj = LEVELS.find((l) => l.id === currentLevelId) || LEVELS[0];
+    let startWord = state.lastPlayedWordIndex || levelObj.start;
+    if (startWord < levelObj.start || startWord >= levelObj.end) {
+      startWord = levelObj.start;
+    }
+    if (typeof SFX !== "undefined") SFX.playTap();
+    startLevel(levelObj, startWord);
+  }
+
+  // Navegação
+  if (homeContinueBtn) homeContinueBtn.addEventListener("click", continueAdventure);
+
+  if (homeAdventureBtn) {
+    homeAdventureBtn.addEventListener("click", () => {
+      if (typeof SFX !== "undefined") SFX.playTap();
+      homeScreen.hidden = true;
+      mapScreen.hidden = false;
+      renderTrail();
+    });
+  }
+
+  if (mapBackToHomeBtn) {
+    mapBackToHomeBtn.addEventListener("click", () => {
+      if (typeof SFX !== "undefined") SFX.playTap();
+      mapScreen.hidden = true;
+      homeScreen.hidden = false;
+      updateHub();
+    });
+  }
+
+  function openGardenModal() {
+    if (typeof SFX !== "undefined") SFX.playTap();
+    Garden.renderGarden();
+    gardenOverlay.hidden = false;
+  }
+  if (homeGardenBtn) homeGardenBtn.addEventListener("click", openGardenModal);
+  if (homeGardenQuickBtn) homeGardenQuickBtn.addEventListener("click", openGardenModal);
+  if (gardenCloseBtn) gardenCloseBtn.addEventListener("click", () => (gardenOverlay.hidden = true));
+
+  function openBadgesModal() {
+    if (typeof SFX !== "undefined") SFX.playTap();
+    Achievements.renderModal();
+    achievementsOverlay.hidden = false;
+  }
+  if (homeBadgesBtn) homeBadgesBtn.addEventListener("click", openBadgesModal);
+  if (achievementsCloseBtn) achievementsCloseBtn.addEventListener("click", () => (achievementsOverlay.hidden = true));
 
   function returnHome() {
     lessonScreen.hidden = true;
+    mapScreen.hidden = true;
     homeScreen.hidden = false;
-    renderTrail();
+    updateHub();
   }
   window.showHome = returnHome;
 
-  // ---- Jardim do Sabi ----
-  function openGarden() {
-    const state = Progress.load();
-    const count = state.wordsCompletedTotal;
-    gardenGrid.innerHTML = "";
-    gardenEmpty.hidden = count > 0;
-    const toRender = Math.min(count, 200);
-    for (let i = 0; i < toRender; i++) {
-      const span = document.createElement("span");
-      span.innerHTML = ICONS.flower;
-      gardenGrid.appendChild(span.firstChild);
-    }
-    gardenOverlay.hidden = false;
+  function returnToMap() {
+    lessonScreen.hidden = true;
+    homeScreen.hidden = true;
+    mapScreen.hidden = false;
+    renderTrail();
   }
-  gardenBtn.addEventListener("click", openGarden);
-  gardenCloseBtn.addEventListener("click", () => {
-    gardenOverlay.hidden = true;
-  });
+  window.showMap = returnToMap;
 
-  // ---- Área dos pais ----
-  function randomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-  }
-
-  function renderParentQuestion() {
-    const a = randomInt(2, 9);
-    const b = randomInt(2, 9);
-    currentAnswer = a + b;
-    parentQuestionEl.textContent = a + " + " + b + " = ?";
-
-    const options = new Set([currentAnswer]);
-    while (options.size < 3) {
-      const delta = randomInt(-3, 3);
-      const candidate = currentAnswer + delta;
-      if (candidate >= 0 && candidate !== currentAnswer) options.add(candidate);
-    }
-    const shuffled = Array.from(options).sort(() => Math.random() - 0.5);
-
-    parentOptionsEl.innerHTML = "";
-    shuffled.forEach((value) => {
-      const b2 = document.createElement("button");
-      b2.className = "parent-option-btn";
-      b2.textContent = String(value);
-      b2.addEventListener("click", () => checkParentAnswer(value));
-      parentOptionsEl.appendChild(b2);
-    });
-  }
-
-  function checkParentAnswer(value) {
-    if (value === currentAnswer) {
-      parentGateOverlay.hidden = true;
-      openParentReport();
-    } else {
-      parentQuestionEl.classList.add("incorrect-flash");
-      setTimeout(() => parentQuestionEl.classList.remove("incorrect-flash"), 500);
-      renderParentQuestion();
-    }
-  }
-
-  function openParentGate() {
-    renderParentQuestion();
-    parentGateOverlay.hidden = false;
-  }
-  parentBtn.addEventListener("click", openParentGate);
-  parentCancelBtn.addEventListener("click", () => {
-    parentGateOverlay.hidden = true;
-  });
-
-  function formatScreenTime(ms) {
-    const totalMin = Math.round(ms / 60000);
-    if (totalMin < 1) return "menos de 1 minuto";
-    if (totalMin < 60) return totalMin + " minuto(s)";
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-    return h + "h" + (m > 0 ? " " + m + "min" : "");
-  }
-
-  function openParentReport() {
-    const state = Progress.load();
-    parentReportBody.textContent =
-      "Palavras aprendidas: " +
-      state.wordsCompletedTotal +
-      ". Tentativas: " +
-      state.attemptsTotal +
-      ". Ilhas concluídas: " +
-      state.completedLevels.length +
-      " de " +
-      LEVELS.length +
-      ". Tempo de tela: " +
-      formatScreenTime(state.totalScreenMs) +
-      ".";
-    parentReportOverlay.hidden = false;
-  }
-  parentReportCloseBtn.addEventListener("click", () => {
-    parentReportOverlay.hidden = true;
-  });
-
-  // ---- Tempo de tela (heartbeat simples) ----
+  // Heartbeat do tempo de tela da criança
   const HEARTBEAT_MS = 30000;
   setInterval(() => {
     if (document.visibilityState === "visible") {
@@ -227,5 +254,7 @@
     }
   }, HEARTBEAT_MS);
 
-  renderTrail();
+  // Inicialização
+  ParentsArea.init();
+  updateHub();
 })();

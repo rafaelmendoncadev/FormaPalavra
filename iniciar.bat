@@ -26,7 +26,7 @@ if not errorlevel 1 (
 
 REM Inicia o servidor numa janela SEPARADA (nao minimizada) para garantir
 REM que o processo Python continue vivo enquanto esta janela fecha.
-start "JogoSilabas-Servidor (porta %PORT%)" cmd /c "python -m http.server %PORT%"
+start "JogoSilabas-Servidor (porta %PORT%)" cmd /c "python -m http.server %PORT% -d www"
 echo Aguardando o servidor subir...
 
 REM Espera o servidor responder HTTP 200 (ate 10 segundos)
